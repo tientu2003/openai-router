@@ -3,9 +3,11 @@ import json
 import httpx
 import logging
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from google import genai
+from fastapi.responses import JSONResponse
 
+CACHE_FILE = "gemini_models_cache.json"
 # --- Setup Logging ---
 logging.basicConfig(
     level=logging.INFO,
@@ -29,6 +31,17 @@ async def list_models():
     """List models from Gemini if available, else from OpenRouter."""
     logger.info("📡 GET /v1/models called")
 
+    # --- check if cache exists ---
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                cached_data = json.load(f)
+                logger.info(f"📂 Loaded {len(cached_data['data'])} models from cache")
+                return JSONResponse(content=cached_data, status_code=200)
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to load cache: {e}, falling back to live fetch")
+
+    # --- fetch from Gemini ---
     if genai_client:
         try:
             logger.info("Using Gemini client to list models...")
@@ -60,8 +73,18 @@ async def list_models():
                     "supported_parameters": getattr(m, "supported_generation_methods", [])
                 })
 
+            response_data = {"object": "list", "data": mapped_models}
+
+            # --- save to cache ---
+            try:
+                with open(CACHE_FILE, "w", encoding="utf-8") as f:
+                    json.dump(response_data, f, ensure_ascii=False, indent=2)
+                logger.info(f"💾 Cached {len(mapped_models)} models to {CACHE_FILE}")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to write cache: {e}")
+
             logger.info(f"✅ Retrieved {len(mapped_models)} models from Gemini")
-            return JSONResponse(content={"object": "list", "data": mapped_models}, status_code=200)
+            return JSONResponse(content=response_data, status_code=200)
 
         except Exception as e:
             logger.error(f"❌ Gemini model list failed: {e}", exc_info=True)
@@ -80,6 +103,7 @@ async def list_models():
     except Exception as e:
         logger.error(f"❌ OpenRouter model list failed: {e}", exc_info=True)
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
 
 def convert_openai_messages_to_gemini_contents(messages: list):
     """Convert OpenAI-style messages to Gemini contents format."""
