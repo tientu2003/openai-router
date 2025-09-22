@@ -1,0 +1,7 @@
+protobuf
+fastapi
+uvicorn[standard]
+httpx
+click
+google-genai
+google
